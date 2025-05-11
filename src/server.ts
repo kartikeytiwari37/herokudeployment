@@ -38,7 +38,15 @@ if (!OPENAI_API_KEY) {
 const app = express();
 // Configure CORS to allow requests from the frontend
 const corsOptions: CorsOptions = {
-  origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002', 'http://localhost:3003'],
+  origin: [
+    'http://localhost:3000', 
+    'http://localhost:3001', 
+    'http://localhost:3002', 
+    'http://localhost:3003',
+    process.env.PUBLIC_URL || '',
+    process.env.FRONTEND_URL || '',
+    /\.herokuapp\.com$/  // Allow all Heroku domains
+  ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
@@ -158,7 +166,8 @@ app.all("/hangup", (req, res) => {
             // Trigger the analyze-call API
             console.log(`[WS-ANALYSIS] Triggering analyze-call API for interview ID: ${recordId}`);
             
-            const response = await fetch("http://localhost:3000/api/analyze-call", {
+            const analyzeBaseUrl = process.env.ANALYZE_API_URL || "http://localhost:3000";
+            const response = await fetch(`${analyzeBaseUrl}/api/analyze-call`, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
