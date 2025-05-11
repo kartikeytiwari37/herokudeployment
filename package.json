@@ -1,0 +1,39 @@
+{
+  "name": "twilio-realtime",
+  "version": "1.0.0",
+  "description": "Twilio real-time server with TypeScript",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc && copyfiles -u 1 src/**/*.xml dist/",
+    "start": "node dist/server.js",
+    "dev": "nodemon --watch 'src/**/*' --watch '.env' --ext 'ts,js,xml,env' --exec 'ts-node' src/server.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.803.0",
+    "@aws-sdk/s3-request-presigner": "^3.803.0",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.12",
+    "copyfiles": "^2.4.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "httpdispatcher": "^2.2.0",
+    "mongodb": "^6.16.0",
+    "multer": "^1.4.5-lts.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/dotenv": "^8.2.0",
+    "@types/express": "^5.0.0",
+    "nodemon": "^3.1.10"
+  }
+}
