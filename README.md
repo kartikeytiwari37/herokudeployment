@@ -94,10 +94,16 @@ Make sure to set all the required environment variables listed in the `.env.hero
 
 The application uses the following build process on Heroku:
 
-1. Heroku installs dependencies from package.json
-2. The `heroku-postbuild` script runs automatically, which executes `npm run build`
-3. The build script compiles TypeScript code and copies XML files to the dist directory
-4. Heroku starts the application using the `start` script
+1. The `heroku-prebuild` script runs first, using `npm install --no-package-lock` to install dependencies without requiring a package-lock.json file
+2. Heroku installs dependencies from package.json
+3. The `heroku-postbuild` script runs automatically, which executes `npm run build`
+4. The build script compiles TypeScript code and copies XML files to the dist directory
+5. Heroku starts the application using the `start` script
+
+### Important Notes
+
+- TypeScript and other build dependencies are included in the main dependencies (not devDependencies) to ensure they're available during the Heroku build process
+- The `heroku-prebuild` script is used to bypass the need for a synchronized package-lock.json file
 
 ## Troubleshooting
 
