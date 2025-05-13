@@ -1,106 +1,174 @@
-# Twilio Real-time Server with TypeScript
+# Voice Backend
 
-A Node.js TypeScript application that integrates Twilio for voice calls, OpenAI for real-time AI conversations, MongoDB for data storage, and AWS S3 for file storage.
+A simplified backend-only voice platform that integrates Twilio for telephony and OpenAI for real-time AI conversations.
 
 ## Features
 
-- Real-time voice calls with AI-powered interviewing
-- WebSocket connections for real-time communication
-- MongoDB integration for data storage
-- AWS S3 integration for file storage
-- TypeScript for type safety
+- Make outbound calls via a simple API
+- Real-time voice conversations with OpenAI's GPT-4o
+- Automatic transcription of conversations
+- Transcript logging to JSON files
 
 ## Prerequisites
 
-- Node.js (v14 or higher)
+- Node.js (v16 or higher)
 - npm or yarn
-- MongoDB database
-- AWS S3 bucket
-- OpenAI API key
-- Twilio account (for voice calls)
+- Twilio account with a phone number
+- OpenAI API key with access to GPT-4o Realtime
 
-## Local Development
+## Installation
 
 1. Clone the repository
 2. Install dependencies:
-   ```
-   npm install
-   ```
-3. Create a `.env` file based on `.env.example`
-4. Run the development server:
-   ```
-   npm run dev
-   ```
 
-## Deployment to Heroku
+```bash
+cd voice-backend
+npm install
+```
 
-### Prerequisites
+3. Configure environment variables:
 
-1. [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli) installed
-2. Heroku account
-3. Git installed
+Copy the `.env` file and update it with your credentials:
 
-### Steps to Deploy
+```bash
+# Server configuration
+PORT=3000
+PUBLIC_URL=https://your-public-url.com  # Must be accessible from the internet for Twilio
 
-1. Login to Heroku:
-   ```
-   heroku login
-   ```
+# Twilio credentials
+TWILIO_ACCOUNT_SID=your_twilio_account_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
 
-2. Create a new Heroku app:
-   ```
-   heroku create your-app-name
-   ```
+# OpenAI configuration
+OPENAI_API_KEY=your_openai_api_key
+```
 
-3. Add the Heroku remote:
-   ```
-   heroku git:remote -a your-app-name
-   ```
+## Usage
 
-4. Set up environment variables in Heroku:
+### Starting the server
 
-   **Option 1: Using the provided script**
-   
-   We've included a helper script to set up all environment variables from your local `.env` file:
-   
-   ```
-   node setup-heroku-env.js your-app-name
-   ```
-   
-   **Option 2: Manually setting variables**
-   
-   ```
-   heroku config:set OPENAI_API_KEY=your_openai_api_key
-   heroku config:set MONGODB_URI=your_mongodb_uri
-   heroku config:set AWS_ACCESS_KEY_ID=your_aws_access_key_id
-   heroku config:set AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
-   heroku config:set AWS_REGION=your_aws_region
-   heroku config:set AWS_S3_BUCKET=your_aws_s3_bucket
-   ```
-   
-   See `.env.heroku` for a complete list of environment variables to set.
+```bash
+# Development mode
+npm run dev
 
-5. Push to Heroku:
-   ```
-   git push heroku main
-   ```
+# Production mode
+npm run build
+npm start
+```
 
-6. Open the app:
-   ```
-   heroku open
-   ```
+### Getting available phone numbers
 
-### Important Notes for Heroku Deployment
+Send a GET request to the `/api/numbers` endpoint:
 
-- The application uses WebSockets, which are supported on Heroku.
-- Make sure to set all required environment variables in Heroku Config Vars.
-- The `PUBLIC_URL` will be automatically set to your Heroku app URL.
-- The application uses the `PORT` environment variable, which Heroku sets automatically.
+```bash
+curl http://localhost:3000/api/numbers
+```
 
-## Environment Variables
+Response:
 
-See `.env.example` and `.env.heroku` for a list of required environment variables.
+```json
+[
+  {
+    "sid": "PN123456789abcdef",
+    "phoneNumber": "+1234567890",
+    "friendlyName": "My Twilio Number"
+  }
+]
+```
+
+### Making a call
+
+Send a POST request to the `/api/call` endpoint:
+
+```bash
+curl -X POST http://localhost:3000/api/call \
+  -H "Content-Type: application/json" \
+  -d '{"number": "+1234567890", "fromNumber": "+0987654321"}'
+```
+
+The `fromNumber` parameter is optional. If not provided, the system will use the first available Twilio phone number.
+
+### Getting a transcript
+
+After a call has ended, you can retrieve the transcript using the call SID:
+
+```bash
+curl http://localhost:3000/api/transcript/CA123456789abcdef
+```
+
+You can also get the transcript in plain text format:
+
+```bash
+curl http://localhost:3000/api/transcript/CA123456789abcdef?format=text
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "callSid": "CA123456789abcdef",
+  "message": "Call initiated to +1234567890"
+}
+```
+
+### Ending a call
+
+Send a POST request to the `/api/end-call` endpoint:
+
+```bash
+curl -X POST http://localhost:3000/api/end-call \
+  -H "Content-Type: application/json" \
+  -d '{"callSid": "CA123456789abcdef"}'
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Call ended successfully"
+}
+```
+
+## How It Works
+
+1. When a call is initiated via the API, Twilio makes a request to the `/twiml` endpoint to get instructions.
+2. The TwiML response tells Twilio to connect to the WebSocket server.
+3. Twilio establishes a WebSocket connection and streams audio to the server.
+4. The server forwards the audio to OpenAI's real-time API.
+5. OpenAI processes the audio, generates responses, and streams them back.
+6. The server forwards the audio responses back to Twilio.
+7. The conversation is transcribed and logged to a JSON file when the call ends.
+
+## Transcript Logs
+
+Transcripts are saved in the `logs` directory with the following format:
+
+```
+{callSid}_{phoneNumber}_{timestamp}.json
+```
+
+Each transcript file contains:
+- Call SID
+- Phone number
+- Timestamp
+- Complete transcript with user and assistant messages
+
+## Public URL Configuration
+
+For Twilio to connect to your WebSocket server, it needs a public URL. In development, you can use a service like ngrok:
+
+```bash
+ngrok http 3000
+```
+
+Then update your `.env` file with the ngrok URL:
+
+```
+PUBLIC_URL=https://your-ngrok-url.ngrok.io
+```
 
 ## License
 
-ISC
+MIT
