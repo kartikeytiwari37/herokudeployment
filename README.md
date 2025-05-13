@@ -1,106 +1,135 @@
-# Twilio Real-time Server with TypeScript
+# Voice Backend Application
 
-A Node.js TypeScript application that integrates Twilio for voice calls, OpenAI for real-time AI conversations, MongoDB for data storage, and AWS S3 for file storage.
-
-## Features
-
-- Real-time voice calls with AI-powered interviewing
-- WebSocket connections for real-time communication
-- MongoDB integration for data storage
-- AWS S3 integration for file storage
-- TypeScript for type safety
-
-## Prerequisites
-
-- Node.js (v14 or higher)
-- npm or yarn
-- MongoDB database
-- AWS S3 bucket
-- OpenAI API key
-- Twilio account (for voice calls)
-
-## Local Development
-
-1. Clone the repository
-2. Install dependencies:
-   ```
-   npm install
-   ```
-3. Create a `.env` file based on `.env.example`
-4. Run the development server:
-   ```
-   npm run dev
-   ```
+A Node.js/TypeScript backend application for voice interactions using Twilio.
 
 ## Deployment to Heroku
 
 ### Prerequisites
 
-1. [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli) installed
-2. Heroku account
-3. Git installed
+- [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli) installed
+- [Git](https://git-scm.com/) installed
+- Heroku account
 
-### Steps to Deploy
+### Deployment Steps
 
-1. Login to Heroku:
-   ```
+1. **Login to Heroku**
+
+   ```bash
    heroku login
    ```
 
-2. Create a new Heroku app:
-   ```
+2. **Create a new Heroku app**
+
+   ```bash
    heroku create your-app-name
    ```
 
-3. Add the Heroku remote:
-   ```
+   Replace `your-app-name` with your desired application name.
+
+3. **Add Heroku remote**
+
+   ```bash
    heroku git:remote -a your-app-name
    ```
 
-4. Set up environment variables in Heroku:
+4. **Set up environment variables**
 
-   **Option 1: Using the provided script**
-   
-   We've included a helper script to set up all environment variables from your local `.env` file:
-   
-   ```
-   node setup-heroku-env.js your-app-name
-   ```
-   
-   **Option 2: Manually setting variables**
-   
-   ```
-   heroku config:set OPENAI_API_KEY=your_openai_api_key
-   heroku config:set MONGODB_URI=your_mongodb_uri
-   heroku config:set AWS_ACCESS_KEY_ID=your_aws_access_key_id
-   heroku config:set AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
-   heroku config:set AWS_REGION=your_aws_region
-   heroku config:set AWS_S3_BUCKET=your_aws_s3_bucket
-   ```
-   
-   See `.env.heroku` for a complete list of environment variables to set.
+   Use the provided script to set up environment variables from the `.env.heroku` template:
 
-5. Push to Heroku:
+   ```bash
+   # Make the script executable
+   chmod +x setup-heroku-env.js
+   
+   # Run the script
+   node setup-heroku-env.js
    ```
+
+   The script will prompt you for necessary values and set them in your Heroku app.
+
+5. **Deploy to Heroku**
+
+   ```bash
    git push heroku main
    ```
 
-6. Open the app:
+   Or if you're on a different branch:
+
+   ```bash
+   git push heroku your-branch:main
    ```
+
+6. **Scale the application**
+
+   ```bash
+   heroku ps:scale web=1
+   ```
+
+7. **Open the application**
+
+   ```bash
    heroku open
    ```
 
-### Important Notes for Heroku Deployment
+## Manual Environment Variable Setup
 
-- The application uses WebSockets, which are supported on Heroku.
-- Make sure to set all required environment variables in Heroku Config Vars.
-- The `PUBLIC_URL` will be automatically set to your Heroku app URL.
-- The application uses the `PORT` environment variable, which Heroku sets automatically.
+If you prefer to set up environment variables manually, you can do so through the Heroku Dashboard or using the Heroku CLI:
 
-## Environment Variables
+```bash
+heroku config:set KEY=VALUE
+```
 
-See `.env.example` and `.env.heroku` for a list of required environment variables.
+Make sure to set all the required environment variables listed in the `.env.heroku` file.
 
-## License
+## Important Environment Variables
 
-ISC
+- `PORT`: Automatically set by Heroku
+- `PUBLIC_URL`: Your Heroku app URL (e.g., https://your-app-name.herokuapp.com)
+- `BASE_URL`: Same as PUBLIC_URL
+- `MONGODB_URI`: Your MongoDB connection string
+- `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`: Your Twilio credentials
+- `AI_PROVIDER`: Set to "openai" or "azure"
+- API keys for OpenAI or Azure OpenAI depending on your AI provider
+
+## Build Process
+
+The application uses the following build process on Heroku:
+
+1. Heroku installs dependencies from package.json
+2. The `heroku-postbuild` script runs automatically, which executes `npm run build`
+3. The build script compiles TypeScript code and copies XML files to the dist directory
+4. Heroku starts the application using the `start` script
+
+## Troubleshooting
+
+- **View logs**: `heroku logs --tail`
+- **Restart the application**: `heroku restart`
+- **Check build packs**: `heroku buildpacks`
+- **SSH into the dyno**: `heroku ps:exec`
+
+## Local Development
+
+1. Install dependencies:
+
+   ```bash
+   npm install
+   ```
+
+2. Create a `.env` file based on `.env.example`
+
+3. Run the development server:
+
+   ```bash
+   npm run dev
+   ```
+
+4. Build for production:
+
+   ```bash
+   npm run build
+   ```
+
+5. Start the production server:
+
+   ```bash
+   npm start
+   ```

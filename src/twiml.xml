@@ -5,5 +5,4 @@
     <Stream url="{{WS_URL}}" />
   </Connect>
   <Say>Disconnected</Say>
-  <Hangup/>
 </Response>

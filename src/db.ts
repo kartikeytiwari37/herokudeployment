@@ -1,308 +1,500 @@
-import { MongoClient, Collection, ObjectId } from 'mongodb';
-import { v4 as uuidv4 } from 'uuid';
+import { MongoClient, Collection, Db, ObjectId } from 'mongodb';
 import dotenv from 'dotenv';
-import { InterviewStatus } from './interview-status';
 
+// Load environment variables
 dotenv.config();
 
-// MongoDB connection string and database details
-const uri = process.env.MONGODB_URI || '';
-const dbName = process.env.MONGODB_DB || 'interview_db';
-const collectionName = process.env.MONGODB_COLLECTION || 'candidateInterviews';
+// MongoDB connection string and database name
+const MONGODB_URI = process.env.MONGODB_URI || '';
+const MONGODB_DB = process.env.MONGODB_DB || 'interview_db';
+const MONGODB_COLLECTION = process.env.MONGODB_COLLECTION || 'candidateInterviews';
+const BULK_RECORDS_COLLECTION = 'bulk_records';
 
-// MongoDB client instance
-let client: MongoClient | null = null;
-let collection: Collection | null = null;
+// Call status enum
+export enum CallStatus {
+  INITIATED = 'INITIATED',
+  CONNECTED = 'CONNECTED',
+  DISCONNECTED = 'DISCONNECTED',
+  FAILED = 'FAILED',
+  COMPLETED = 'COMPLETED'
+}
+
+// Bulk record status enum
+export enum BulkRecordStatus {
+  INSUFFICIENT_INFO = 'INSUFFICIENT_INFO',
+  PENDING = 'PENDING',
+  CALL_INITIATED = 'CALL_INITIATED'
+}
+
+// MongoDB client
+let client: MongoClient;
+let db: Db;
+let candidateInterviews: Collection;
+let bulkRecords: Collection;
 
 /**
- * Initialize the MongoDB connection
+ * Connect to MongoDB
  */
-export async function connectToDatabase() {
-  if (!uri) {
-    throw new Error('MongoDB URI is not defined in environment variables');
-  }
-
+export async function connectToMongoDB() {
   try {
-    client = new MongoClient(uri);
+    if (!MONGODB_URI) {
+      console.error('MONGODB_URI environment variable is not set');
+      return;
+    }
+
+    console.log('Connecting to MongoDB...');
+    client = new MongoClient(MONGODB_URI);
     await client.connect();
-    console.log('Connected to MongoDB');
     
-    const db = client.db(dbName);
-    collection = db.collection(collectionName);
+    db = client.db(MONGODB_DB);
+    candidateInterviews = db.collection(MONGODB_COLLECTION);
+    bulkRecords = db.collection(BULK_RECORDS_COLLECTION);
     
-    return { client, collection };
+    console.log(`Connected to MongoDB: ${MONGODB_DB}.${MONGODB_COLLECTION} and ${BULK_RECORDS_COLLECTION}`);
+    return true;
   } catch (error) {
     console.error('Error connecting to MongoDB:', error);
-    throw error;
+    return false;
   }
 }
 
 /**
- * Close the MongoDB connection
+ * Create a new candidate interview record
  */
-export async function closeConnection() {
-  if (client) {
-    await client.close();
-    console.log('MongoDB connection closed');
-    client = null;
-    collection = null;
-  }
-}
-
-/**
- * Create a new interview record in the database
- * @param data Interview data to save
- * @returns The created document
- */
-export async function createInterviewRecord(data: any) {
-  if (!collection) {
-    await connectToDatabase();
-  }
-
-  if (!collection) {
-    throw new Error('Failed to connect to MongoDB collection');
-  }
-
+export async function createCandidateInterview(callSid: string, candidateInfo: any, jobDetails: any) {
   try {
-    // Format the data according to the desired schema
-    const now = new Date();
-    const formattedDate = now.toISOString().replace('Z', '+05:30');
-    
-    // Generate a UUID for the _id
-    const id = uuidv4();
-    
-    // Extract data from the input
-    const { customerName, customerLocation, customerProduct, phoneNumber, ...otherData } = data;
-    
-    // Create the base metadata
-    const metadata: Record<string, any> = {
-      createdBy: 'System',
-      updatedBy: 'System',
-      source: 'Voice Platform'
-    };
-    
-    // Add callSid to metadata if it exists
-    if (otherData.callSid) {
-      metadata.callSid = otherData.callSid;
+    if (!candidateInterviews) {
+      console.error('MongoDB collection not initialized');
+      return null;
     }
+
+    const now = new Date();
     
-    // Create the document with the proper schema
     const document = {
-      _id: id,
-      candidateInfo: {
-        name: customerName || 'Unknown',
-        phoneNumber: phoneNumber || 'Unknown',
-        currentLocation: customerLocation || 'Unknown'
-      },
-      jobDetails: {
-        location: customerLocation || 'Unknown',
-        requiredProduct: customerProduct || 'Unknown',
-        designation: 'Field Sales Executive'
-      },
-      screeningInfo: {
-        transcript: '',
-        decision: '',
-        remarks: '',
-        rejectionReason: '',
-        analysis: ''
-      },
-      cvInfo: {
-        referenceId: otherData.cvReferenceId || '',
-        fileName: otherData.cvFileName || '',
-        extractedInfo: otherData.cvExtractedInfo || null
-      },
-      status: InterviewStatus.PENDING,
-      interviewTime: formattedDate,
-      createdAt: formattedDate,
-      updatedAt: formattedDate,
-      metadata: metadata,
-    // Include any other data that was passed in but exclude callSid and CV-related fields from top level
-    ...Object.entries(otherData)
-      .filter(([key]) => !['callSid', 'cvReferenceId', 'cvFileName', 'cvExtractedInfo'].includes(key))
-      .reduce((acc, [key, value]) => ({ ...acc, [key]: value }), {})
+      _id: callSid,
+      candidateInfo,
+      jobDetails,
+      status: CallStatus.INITIATED,
+      createdAt: now,
+      updatedAt: now
     };
-    
-    // Insert the document - use type assertion to bypass TypeScript's type checking
-    const result = await collection.insertOne(document as any);
-    
-    if (result.acknowledged) {
-      console.log(`Interview record created with ID: ${id}`);
-      return document;
-    } else {
-      throw new Error('Failed to insert document');
-    }
+
+    // @ts-ignore - We're using string IDs instead of ObjectId
+    await candidateInterviews.insertOne(document);
+    console.log(`Created candidate interview record for call SID: ${callSid}`);
+    return document;
   } catch (error) {
-    console.error('Error creating interview record:', error);
-    throw error;
+    console.error('Error creating candidate interview record:', error);
+    return null;
   }
 }
 
 /**
- * Update an existing interview record
- * @param id The ID of the record to update
- * @param data The data to update
- * @returns The updated document
+ * Update candidate interview status
  */
-export async function updateInterviewRecord(id: string, data: any) {
-  if (!collection) {
-    await connectToDatabase();
-  }
-
-  if (!collection) {
-    throw new Error('Failed to connect to MongoDB collection');
-  }
-
+export async function updateCandidateInterviewStatus(callSid: string, status: CallStatus) {
   try {
-    // Format the update data according to the schema
-    const now = new Date();
-    const formattedDate = now.toISOString().replace('Z', '+05:30');
-    const updateData: any = { updatedAt: formattedDate };
+    if (!candidateInterviews) {
+      console.error('MongoDB collection not initialized');
+      return false;
+    }
+
+    const result = await candidateInterviews.updateOne(
+      { _id: callSid } as any,
+      { 
+        $set: { 
+          status,
+          updatedAt: new Date()
+        } 
+      }
+    );
+
+    console.log(`Updated status for call SID ${callSid} to ${status}`);
+    return result.modifiedCount > 0;
+  } catch (error) {
+    console.error('Error updating candidate interview status:', error);
+    return false;
+  }
+}
+
+/**
+ * Update candidate interview with transcript and analysis
+ */
+export async function updateCandidateInterviewWithTranscript(
+  callSid: string, 
+  transcript: string, 
+  analysis: string
+) {
+  try {
+    if (!candidateInterviews) {
+      console.error('MongoDB collection not initialized');
+      return false;
+    }
+
+    // Extract decision and remarks from analysis
+    const decision = extractDecisionFromAnalysis(analysis);
+    const remarks = extractRemarksFromAnalysis(analysis);
+
+    const result = await candidateInterviews.updateOne(
+      { _id: callSid } as any,
+      { 
+        $set: { 
+          'screeningInfo.transcript': transcript,
+          'screeningInfo.analysis': analysis,
+          'screeningInfo.decision': decision,
+          'screeningInfo.remarks': remarks,
+          status: CallStatus.COMPLETED,
+          updatedAt: new Date()
+        } 
+      }
+    );
+
+    console.log(`Updated transcript and analysis for call SID: ${callSid}`);
+    return result.modifiedCount > 0;
+  } catch (error) {
+    console.error('Error updating candidate interview with transcript:', error);
+    return false;
+  }
+}
+
+/**
+ * Get candidate interview by call SID
+ */
+export async function getCandidateInterview(callSid: string) {
+  try {
+    if (!candidateInterviews) {
+      console.error('MongoDB collection not initialized');
+      return null;
+    }
+
+    const document = await candidateInterviews.findOne({ _id: callSid } as any);
+    return document;
+  } catch (error) {
+    console.error('Error getting candidate interview:', error);
+    return null;
+  }
+}
+
+/**
+ * Extract decision (GO/NO GO) from analysis
+ */
+function extractDecisionFromAnalysis(analysis: string): string {
+  try {
+    console.log('Extracting decision from analysis...');
     
-    // Extract data from the input
-    const { 
-      status, 
-      callSid, 
-      customerName, 
-      customerLocation, 
-      customerProduct,
-      transcript,
-      decision,
-      remarks,
-      rejectionReason,
-      analysis,
-      cvReferenceId,
-      cvFileName,
-      cvExtractedInfo
-    } = data;
+    // Look for the hiring recommendation section with improved pattern matching
+    const recommendationPatterns = [
+      // Pattern 1: HIRING RECOMMENDATION: followed by text
+      /HIRING RECOMMENDATION[:\s]*[\r\n]*(.*?)(?:[\r\n]|$)/i,
+      
+      // Pattern 2: Recommendation: followed by text
+      /Recommendation[:\s]*(.*?)(?:[\r\n]|$)/i,
+      
+      // Pattern 3: Numbered recommendation (e.g., "8. HIRING RECOMMENDATION: NO GO")
+      /\d+\.\s*HIRING RECOMMENDATION[:\s]*[\r\n]*(.*?)(?:[\r\n]|$)/i,
+      
+      // Pattern 4: Bold recommendation (e.g., "**Recommendation**: NO GO")
+      /\*\*(?:HIRING )?RECOMMENDATION\*\*[:\s]*(.*?)(?:[\r\n]|$)/i
+    ];
     
-    // Update specific fields based on what was provided
-    if (status) {
-      // Validate status if provided
-      if (typeof status === 'string' && !Object.values(InterviewStatus).includes(status as InterviewStatus)) {
-        console.warn(`Invalid status: ${status}. Using ERROR status instead.`);
-        updateData.status = InterviewStatus.ERROR;
-      } else {
-        updateData.status = status;
+    // Try each pattern
+    for (const pattern of recommendationPatterns) {
+      const match = analysis.match(pattern);
+      if (match && match[1]) {
+        const recommendationText = match[1].trim();
+        console.log(`Found recommendation text: "${recommendationText}"`);
+        
+        // Check for NO GO (check this first as it contains GO)
+        if (recommendationText.toUpperCase().includes('NO GO')) {
+          console.log('Decision extracted: NO GO');
+          return 'NO GO';
+        } 
+        // Check for GO
+        else if (recommendationText.toUpperCase().includes('GO')) {
+          console.log('Decision extracted: GO');
+          return 'GO';
+        }
       }
     }
     
-    if (callSid) {
-      updateData['metadata.callSid'] = callSid;
+    // If no match found with the patterns above, search the entire text for GO/NO GO
+    if (analysis.toUpperCase().includes('NO GO')) {
+      console.log('Decision extracted from full text: NO GO');
+      return 'NO GO';
+    } else if (analysis.toUpperCase().includes('GO') && !analysis.toUpperCase().includes('NO GO')) {
+      console.log('Decision extracted from full text: GO');
+      return 'GO';
     }
     
-    if (customerName) {
-      updateData['candidateInfo.name'] = customerName;
-    }
-    
-    if (customerLocation) {
-      updateData['candidateInfo.currentLocation'] = customerLocation;
-      updateData['jobDetails.location'] = customerLocation;
-    }
-    
-    if (customerProduct) {
-      updateData['jobDetails.requiredProduct'] = customerProduct;
-    }
-    
-    if (transcript) {
-      updateData['screeningInfo.transcript'] = transcript;
-    }
-    
-    if (decision) {
-      updateData['screeningInfo.decision'] = decision;
-    }
-    
-    if (remarks) {
-      updateData['screeningInfo.remarks'] = remarks;
-    }
-    
-    if (rejectionReason) {
-      updateData['screeningInfo.rejectionReason'] = rejectionReason;
-    }
-    
-    if (analysis) {
-      updateData['screeningInfo.analysis'] = analysis;
-    }
-    
-    // Update CV information if provided
-    if (cvReferenceId) {
-      updateData['cvInfo.referenceId'] = cvReferenceId;
-    }
-    
-    if (cvFileName) {
-      updateData['cvInfo.fileName'] = cvFileName;
-    }
-    
-    if (cvExtractedInfo) {
-      updateData['cvInfo.extractedInfo'] = cvExtractedInfo;
-    }
-    
-    updateData['metadata.updatedBy'] = 'System';
-    
-    // Convert ObjectId string to ObjectId if needed
-    let objectId;
-    try {
-      objectId = new ObjectId(id);
-    } catch (e) {
-      // If conversion fails, use the string ID directly
-      objectId = id;
-    }
-    
-    // Update the document
-    const result = await collection.findOneAndUpdate(
-      { _id: objectId } as any, // Type assertion to bypass TypeScript's type checking
-      { $set: updateData },
-      { returnDocument: 'after' }
-    );
-    
-    if (result) {
-      console.log(`Interview record updated: ${id}`);
-      return result;
-    } else {
-      throw new Error(`No record found with _id: ${id}`);
-    }
+    console.log('No decision found, returning UNDETERMINED');
+    return 'UNDETERMINED';
   } catch (error) {
-    console.error('Error updating interview record:', error);
-    throw error;
+    console.error('Error extracting decision from analysis:', error);
+    return 'UNDETERMINED';
   }
 }
 
 /**
- * Get an interview record by its ID
- * @param id The ID of the record to retrieve
- * @returns The interview record
+ * Extract remarks from analysis
  */
-export async function getInterviewRecord(id: string) {
-  if (!collection) {
-    await connectToDatabase();
-  }
-
-  if (!collection) {
-    throw new Error('Failed to connect to MongoDB collection');
-  }
-
+function extractRemarksFromAnalysis(analysis: string): string {
   try {
-    // Convert ObjectId string to ObjectId if needed
-    let objectId;
-    try {
-      objectId = new ObjectId(id);
-    } catch (e) {
-      // If conversion fails, use the string ID directly
-      objectId = id;
+    console.log('Extracting remarks from analysis...');
+    
+    // Define patterns to look for justification or remarks
+    const remarkPatterns = [
+      // Pattern 1: Justification: followed by text
+      /Justification[:\s]*(.*?)(?:[\r\n](?:\s*[\r\n]|$)|$)/is,
+      
+      // Pattern 2: Overall candidate evaluation: followed by text
+      /Overall candidate evaluation[:\s]*(.*?)(?:[\r\n](?:\s*[\r\n]|$)|$)/is,
+      
+      // Pattern 3: Numbered justification (e.g., "8. HIRING RECOMMENDATION: NO GO\nJustification: text")
+      /HIRING RECOMMENDATION[:\s]*.*?[\r\n]+\s*Justification[:\s]*(.*?)(?:[\r\n](?:\s*[\r\n]|$)|$)/is,
+      
+      // Pattern 4: Bold justification (e.g., "**Justification**: text")
+      /\*\*Justification\*\*[:\s]*(.*?)(?:[\r\n](?:\s*[\r\n]|$)|$)/is,
+      
+      // Pattern 5: Text after recommendation (e.g., "Recommendation: NO GO - text")
+      /Recommendation[:\s]*(?:GO|NO GO)[:\s-]*(.*?)(?:[\r\n](?:\s*[\r\n]|$)|$)/is
+    ];
+    
+    // Try each pattern
+    for (const pattern of remarkPatterns) {
+      const match = analysis.match(pattern);
+      if (match && match[1]) {
+        const remarkText = match[1].trim();
+        console.log(`Found remarks: "${remarkText.substring(0, 50)}..."`);
+        return remarkText;
+      }
     }
     
-    // Find document by ID
-    const record = await collection.findOne({ _id: objectId } as any); // Type assertion to bypass TypeScript's type checking
-    
-    if (record) {
-      return record;
-    } else {
-      throw new Error(`No record found with _id: ${id}`);
+    // If no match found with the patterns above, look for text after the recommendation
+    const recommendationIndex = analysis.toUpperCase().indexOf('NO GO');
+    if (recommendationIndex !== -1) {
+      // Get text after "NO GO"
+      const textAfterRecommendation = analysis.substring(recommendationIndex + 5).trim();
+      const firstSentence = textAfterRecommendation.split(/[.!?][\s\n]/)[0];
+      
+      if (firstSentence && firstSentence.length > 10) {
+        console.log(`Found remarks after NO GO: "${firstSentence}"`);
+        return firstSentence + '.';
+      }
     }
+    
+    // If still nothing, try to find a section that looks like a conclusion or summary
+    const conclusionPatterns = [
+      /In conclusion[,:\s]*(.*?)(?:[\r\n](?:\s*[\r\n]|$)|$)/is,
+      /Summary[:\s]*(.*?)(?:[\r\n](?:\s*[\r\n]|$)|$)/is,
+      /Overall[,:\s]*(.*?)(?:[\r\n](?:\s*[\r\n]|$)|$)/is
+    ];
+    
+    for (const pattern of conclusionPatterns) {
+      const match = analysis.match(pattern);
+      if (match && match[1]) {
+        const conclusionText = match[1].trim();
+        console.log(`Found conclusion: "${conclusionText.substring(0, 50)}..."`);
+        return conclusionText;
+      }
+    }
+    
+    // If still nothing, return a portion of the analysis
+    const lines = analysis.split('\n').filter(line => line.trim() !== '');
+    if (lines.length > 5) {
+      const relevantLines = lines.slice(0, 5).join('\n');
+      console.log(`Using first 5 lines as remarks`);
+      return relevantLines;
+    }
+    
+    console.log(`Using first 200 characters as remarks`);
+    return analysis.substring(0, 200) + '...';
   } catch (error) {
-    console.error('Error retrieving interview record:', error);
-    throw error;
+    console.error('Error extracting remarks from analysis:', error);
+    return 'No remarks available';
   }
 }
 
-// Initialize the database connection when the module is imported
-connectToDatabase().catch(console.error);
+/**
+ * Create a new bulk record
+ */
+export async function createBulkRecord(candidateData: any) {
+  try {
+    if (!bulkRecords) {
+      console.error('MongoDB bulk_records collection not initialized');
+      return null;
+    }
+
+    const now = new Date();
+    
+    // Determine status based on data completeness
+    const status = isCandidateDataComplete(candidateData) 
+      ? BulkRecordStatus.PENDING 
+      : BulkRecordStatus.INSUFFICIENT_INFO;
+    
+    const document = {
+      ...candidateData,
+      status,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    const result = await bulkRecords.insertOne(document);
+    console.log(`Created bulk record with ID: ${result.insertedId}`);
+    return { ...document, _id: result.insertedId };
+  } catch (error) {
+    console.error('Error creating bulk record:', error);
+    return null;
+  }
+}
+
+/**
+ * Update a bulk record with CV information
+ */
+export async function updateBulkRecordWithCVInfo(recordId: string, cvInfo: any) {
+  try {
+    if (!bulkRecords) {
+      console.error('MongoDB bulk_records collection not initialized');
+      return false;
+    }
+
+    const result = await bulkRecords.updateOne(
+      { _id: new ObjectId(recordId) },
+      { 
+        $set: { 
+          cvInfo,
+          updatedAt: new Date()
+        } 
+      }
+    );
+
+    console.log(`Updated bulk record ${recordId} with CV info`);
+    
+    // Check if the record is now complete after adding CV info
+    const updatedRecord = await bulkRecords.findOne({ _id: new ObjectId(recordId) });
+    if (updatedRecord && isCandidateDataComplete(updatedRecord)) {
+      await bulkRecords.updateOne(
+        { _id: new ObjectId(recordId) },
+        { 
+          $set: { 
+            status: BulkRecordStatus.PENDING,
+            updatedAt: new Date()
+          } 
+        }
+      );
+      console.log(`Updated bulk record ${recordId} status to PENDING`);
+    }
+    
+    return result.modifiedCount > 0;
+  } catch (error) {
+    console.error('Error updating bulk record with CV info:', error);
+    return false;
+  }
+}
+
+/**
+ * Get all bulk records
+ */
+export async function getAllBulkRecords() {
+  try {
+    if (!bulkRecords) {
+      console.error('MongoDB bulk_records collection not initialized');
+      return [];
+    }
+
+    return await bulkRecords.find().toArray();
+  } catch (error) {
+    console.error('Error getting bulk records:', error);
+    return [];
+  }
+}
+
+/**
+ * Get bulk record by ID
+ */
+export async function getBulkRecordById(recordId: string) {
+  try {
+    if (!bulkRecords) {
+      console.error('MongoDB bulk_records collection not initialized');
+      return null;
+    }
+
+    return await bulkRecords.findOne({ _id: new ObjectId(recordId) });
+  } catch (error) {
+    console.error('Error getting bulk record by ID:', error);
+    return null;
+  }
+}
+
+/**
+ * Get a pending bulk record for calling
+ */
+export async function getPendingBulkRecord() {
+  try {
+    if (!bulkRecords) {
+      console.error('MongoDB bulk_records collection not initialized');
+      return null;
+    }
+
+    // Find a record with PENDING status
+    const record = await bulkRecords.findOne({ status: BulkRecordStatus.PENDING });
+    
+    if (!record) {
+      console.log('No pending bulk records found');
+      return null;
+    }
+    
+    console.log(`Found pending bulk record with ID: ${record._id}`);
+    return record;
+  } catch (error) {
+    console.error('Error getting pending bulk record:', error);
+    return null;
+  }
+}
+
+/**
+ * Update bulk record with call SID and status
+ */
+export async function updateBulkRecordWithCallSid(recordId: string, callSid: string) {
+  try {
+    if (!bulkRecords) {
+      console.error('MongoDB bulk_records collection not initialized');
+      return false;
+    }
+
+    const result = await bulkRecords.updateOne(
+      { _id: new ObjectId(recordId) },
+      { 
+        $set: { 
+          callSid,
+          status: BulkRecordStatus.CALL_INITIATED,
+          updatedAt: new Date()
+        } 
+      }
+    );
+
+    console.log(`Updated bulk record ${recordId} with call SID ${callSid} and status CALL_INITIATED`);
+    return result.modifiedCount > 0;
+  } catch (error) {
+    console.error('Error updating bulk record with call SID:', error);
+    return false;
+  }
+}
+
+/**
+ * Check if candidate data is complete
+ */
+function isCandidateDataComplete(candidateData: any): boolean {
+  // Check if all required fields are present and not empty
+  return !!(
+    candidateData.name &&
+    candidateData.location &&
+    candidateData.product &&
+    candidateData.designation &&
+    candidateData.phoneNumber &&
+    candidateData.cvInfo &&
+    candidateData.cvInfo.extractedInfo
+  );
+}
+
+// Initialize MongoDB connection
+connectToMongoDB().catch(console.error);
