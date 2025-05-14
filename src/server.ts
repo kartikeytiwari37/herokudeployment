@@ -421,6 +421,66 @@ router.get("/api/transcript/:callSid", async (req, res) => {
   }
 });
 
+// API endpoint to download transcript or analysis as a text file
+router.get("/api/download/:callSid", async (req, res) => {
+  try {
+    const { callSid } = req.params;
+    const { type } = req.query;
+    
+    if (!callSid) {
+      return res.status(400).json({ error: "Call SID is required" });
+    }
+    
+    if (!type || (type !== 'transcript' && type !== 'analysis')) {
+      return res.status(400).json({ 
+        error: "Invalid type parameter", 
+        details: "Type must be either 'transcript' or 'analysis'" 
+      });
+    }
+    
+    console.log(`Downloading ${type} for call SID: ${callSid}`);
+    
+    // Get the interview from MongoDB
+    const interview = await getCandidateInterview(callSid);
+    
+    if (!interview) {
+      return res.status(404).json({ error: `No interview found for call SID: ${callSid}` });
+    }
+    
+    let content = '';
+    let filename = '';
+    
+    if (type === 'transcript') {
+      if (!interview.screeningInfo || !interview.screeningInfo.transcript) {
+        return res.status(404).json({ error: `No transcript found for call SID: ${callSid}` });
+      }
+      content = interview.screeningInfo.transcript;
+      filename = `${callSid}_transcript.txt`;
+    } else { // type === 'analysis'
+      if (!interview.screeningInfo || !interview.screeningInfo.analysis) {
+        return res.status(404).json({ error: `No analysis found for call SID: ${callSid}` });
+      }
+      content = interview.screeningInfo.analysis;
+      filename = `${callSid}_analysis.txt`;
+    }
+    
+    // Set headers for file download
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'text/plain');
+    
+    // Return the content as a downloadable file
+    console.log(`Sending ${type} as downloadable file: ${filename}`);
+    return res.send(content);
+    
+  } catch (error) {
+    console.error(`Error downloading ${req.query.type || 'file'}:`, error);
+    return res.status(500).json({
+      error: `Failed to download ${req.query.type || 'file'}`,
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
 // API endpoint to get analysis for a call
 router.get("/api/analysis/:callSid", async (req, res) => {
   try {
@@ -698,6 +758,152 @@ router.get("/api/candidates/bulk-records", async (req, res) => {
     console.error('Error getting bulk records:', error);
     return res.status(500).json({
       error: 'Failed to get bulk records',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// API endpoint to search bulk records with optional status filter and pagination
+router.get("/api/bulk-records/search", async (req, res) => {
+  try {
+    const { searchBulkRecords, BulkRecordStatus } = await import("./db");
+    
+    // Parse query parameters
+    const status = req.query.status as string;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    
+    // Validate page and limit
+    if (page < 1) {
+      return res.status(400).json({
+        error: 'Invalid page number',
+        details: 'Page number must be greater than or equal to 1'
+      });
+    }
+    
+    if (limit < 1 || limit > 100) {
+      return res.status(400).json({
+        error: 'Invalid limit',
+        details: 'Limit must be between 1 and 100'
+      });
+    }
+    
+    // Validate status if provided
+    let statusFilter: typeof BulkRecordStatus[keyof typeof BulkRecordStatus] | undefined;
+    if (status) {
+      // Check if status is valid
+      if (Object.values(BulkRecordStatus).includes(status as typeof BulkRecordStatus[keyof typeof BulkRecordStatus])) {
+        statusFilter = status as typeof BulkRecordStatus[keyof typeof BulkRecordStatus];
+      } else {
+        return res.status(400).json({
+          error: 'Invalid status',
+          details: `Status must be one of: ${Object.values(BulkRecordStatus).join(', ')}`
+        });
+      }
+    }
+    
+    console.log(`Searching bulk records with status: ${statusFilter || 'All'}, page: ${page}, limit: ${limit}`);
+    
+    // Search bulk records
+    const result = await searchBulkRecords(statusFilter, page, limit);
+    
+    // Return results
+    return res.status(200).json({
+      success: true,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+      records: result.records.map(record => ({
+        id: record._id,
+        name: record.name,
+        location: record.location,
+        product: record.product,
+        designation: record.designation,
+        phoneNumber: record.phoneNumber,
+        status: record.status,
+        cvFilename: record.cvFilename,
+        hasCvInfo: !!record.cvInfo,
+        cvInfo: record.cvInfo, // Include the full cvInfo object
+        callSid: record.callSid,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt
+      }))
+    });
+  } catch (error) {
+    console.error('Error searching bulk records:', error);
+    return res.status(500).json({
+      error: 'Failed to search bulk records',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// API endpoint to search candidate interviews with optional status filter and pagination
+router.get("/api/candidateInterviews/search", async (req, res) => {
+  try {
+    const { searchCandidateInterviews, CallStatus } = await import("./db");
+    
+    // Parse query parameters
+    const status = req.query.status as string;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    
+    // Validate page and limit
+    if (page < 1) {
+      return res.status(400).json({
+        error: 'Invalid page number',
+        details: 'Page number must be greater than or equal to 1'
+      });
+    }
+    
+    if (limit < 1 || limit > 100) {
+      return res.status(400).json({
+        error: 'Invalid limit',
+        details: 'Limit must be between 1 and 100'
+      });
+    }
+    
+    // Validate status if provided
+    let statusFilter: typeof CallStatus[keyof typeof CallStatus] | undefined;
+    if (status) {
+      // Check if status is valid
+      if (Object.values(CallStatus).includes(status as typeof CallStatus[keyof typeof CallStatus])) {
+        statusFilter = status as typeof CallStatus[keyof typeof CallStatus];
+      } else {
+        return res.status(400).json({
+          error: 'Invalid status',
+          details: `Status must be one of: ${Object.values(CallStatus).join(', ')}`
+        });
+      }
+    }
+    
+    console.log(`Searching candidate interviews with status: ${statusFilter || 'All'}, page: ${page}, limit: ${limit}`);
+    
+    // Search candidate interviews
+    const result = await searchCandidateInterviews(statusFilter, page, limit);
+    
+    // Return results
+    return res.status(200).json({
+      success: true,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+      interviews: result.interviews.map(interview => ({
+        callSid: interview._id,
+        candidateInfo: interview.candidateInfo,
+        jobDetails: interview.jobDetails,
+        status: interview.status,
+        screeningInfo: interview.screeningInfo,
+        createdAt: interview.createdAt,
+        updatedAt: interview.updatedAt
+      }))
+    });
+  } catch (error) {
+    console.error('Error searching candidate interviews:', error);
+    return res.status(500).json({
+      error: 'Failed to search candidate interviews',
       details: error instanceof Error ? error.message : 'Unknown error'
     });
   }

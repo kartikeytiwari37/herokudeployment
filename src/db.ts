@@ -176,6 +176,56 @@ export async function getCandidateInterview(callSid: string) {
 }
 
 /**
+ * Search candidate interviews by status with pagination
+ * @param status Optional status filter
+ * @param page Page number (starting from 1)
+ * @param limit Number of records per page
+ * @returns Object containing total count and array of candidate interviews
+ */
+export async function searchCandidateInterviews(
+  status?: typeof CallStatus[keyof typeof CallStatus],
+  page: number = 1,
+  limit: number = 10
+) {
+  try {
+    if (!candidateInterviews) {
+      console.error('MongoDB collection not initialized');
+      return { total: 0, interviews: [] };
+    }
+
+    // Create filter based on status
+    const filter = status ? { status } : {};
+    
+    // Calculate skip value for pagination
+    const skip = (page - 1) * limit;
+    
+    // Get total count
+    const total = await candidateInterviews.countDocuments(filter);
+    
+    // Get paginated results
+    const interviews = await candidateInterviews
+      .find(filter)
+      .sort({ createdAt: -1 }) // Sort by creation date, newest first
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+    
+    console.log(`Found ${interviews.length} candidate interviews with filter:`, filter);
+    
+    return {
+      total,
+      interviews,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    };
+  } catch (error) {
+    console.error('Error searching candidate interviews:', error);
+    return { total: 0, interviews: [] };
+  }
+}
+
+/**
  * Extract decision (GO/NO GO) from analysis
  */
 function extractDecisionFromAnalysis(analysis: string): string {
@@ -405,6 +455,56 @@ export async function getAllBulkRecords() {
   } catch (error) {
     console.error('Error getting bulk records:', error);
     return [];
+  }
+}
+
+/**
+ * Search bulk records by status with pagination
+ * @param status Optional status filter
+ * @param page Page number (starting from 1)
+ * @param limit Number of records per page
+ * @returns Object containing total count and array of bulk records
+ */
+export async function searchBulkRecords(
+  status?: typeof BulkRecordStatus[keyof typeof BulkRecordStatus],
+  page: number = 1,
+  limit: number = 10
+) {
+  try {
+    if (!bulkRecords) {
+      console.error('MongoDB bulk_records collection not initialized');
+      return { total: 0, records: [] };
+    }
+
+    // Create filter based on status
+    const filter = status ? { status } : {};
+    
+    // Calculate skip value for pagination
+    const skip = (page - 1) * limit;
+    
+    // Get total count
+    const total = await bulkRecords.countDocuments(filter);
+    
+    // Get paginated results
+    const records = await bulkRecords
+      .find(filter)
+      .sort({ createdAt: -1 }) // Sort by creation date, newest first
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+    
+    console.log(`Found ${records.length} bulk records with filter:`, filter);
+    
+    return {
+      total,
+      records,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    };
+  } catch (error) {
+    console.error('Error searching bulk records:', error);
+    return { total: 0, records: [] };
   }
 }
 
