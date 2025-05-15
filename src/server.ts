@@ -909,6 +909,16 @@ router.get("/api/candidateInterviews/search", async (req, res) => {
   }
 });
 
+router.get('/health', (req, res) => {
+  res.status(200).json({
+      status: 'UP',
+      timestamp: new Date().toISOString(),
+      version: process.env.npm_package_version || '1.0.0',
+      service: 'tatkal-pulse-websocket-server'
+  });
+});
+
+
 // API endpoint for bulk candidate upload via CSV
 router.post("/api/candidates/bulk-upload", (req, res) => {
   csvUpload.single('file')(req, res, async (err) => {
