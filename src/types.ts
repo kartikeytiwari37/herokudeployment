@@ -32,6 +32,7 @@ export interface Session {
   customerName?: string;
   customerLocation?: string;
   customerProduct?: string;
+  persona?: string;
   transcript: TranscriptItem[];
   disconnectReason?: string;
 }

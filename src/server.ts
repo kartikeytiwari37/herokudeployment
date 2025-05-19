@@ -12,6 +12,8 @@ import { connectToMongoDB, createCandidateInterview, updateCandidateInterviewSta
 import multer from "multer";
 import { uploadMultipleFilesToS3, isS3Configured } from "./s3Service";
 import { parseCandidateCSV } from "./csvParser";
+import { personaExists, addPersona, getAvailablePersonas } from "./promptConfig";
+import { debug } from "console";
 
 // Load environment variables
 dotenv.config();
@@ -345,6 +347,88 @@ router.post("/api/end-call", async (req, res) => {
     console.error("Error ending call:", error);
     return res.status(500).json({
       error: "Failed to end call",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// API endpoint to set the persona for the AI
+router.post("/api/set-persona", async (req, res) => {
+  try {
+    const { persona, promptText, description } = req.body;
+    
+    if (!persona) {
+      return res.status(400).json({ error: "Persona name is required" });
+    }
+    
+    // Get the current session
+    const session = getSession();
+    
+    // Handle "Manual Entry" persona
+    if (persona === "Manual Entry") {
+      if (!promptText) {
+        return res.status(400).json({ 
+          error: "Prompt text is required for Manual Entry persona",
+          details: "Please provide the prompt text for the custom persona"
+        });
+      }
+      
+      // Add the custom persona to the map
+      addPersona("Manual Entry", promptText, description || "Custom prompt text");
+      
+      // Set the persona in the session
+      session.persona = "Manual Entry";
+      
+      console.log(`Set persona to "Manual Entry" with custom prompt text`);
+      
+      return res.json({
+        success: true,
+        message: "Manual Entry persona set successfully",
+        persona: "Manual Entry"
+      });
+    }
+    
+    // Check if the persona exists
+    if (!personaExists(persona)) {
+      return res.status(400).json({ 
+        error: "Invalid persona",
+        details: `Persona "${persona}" does not exist. Available personas: ${getAvailablePersonas().join(", ")}`
+      });
+    }
+    
+    // Set the persona in the session
+    session.persona = persona;
+    
+    console.log(`Set persona to "${persona}"`);
+    
+    return res.json({
+      success: true,
+      message: `Persona set to "${persona}" successfully`,
+      persona: persona
+    });
+  } catch (error) {
+    console.error("Error setting persona:", error);
+    return res.status(500).json({
+      error: "Failed to set persona",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// API endpoint to get available personas
+router.get("/api/personas", async (req, res) => {
+  try {
+    // Get all available personas
+    const personas = getAvailablePersonas();
+    
+    return res.json({
+      success: true,
+      personas: personas
+    });
+  } catch (error) {
+    console.error("Error getting personas:", error);
+    return res.status(500).json({
+      error: "Failed to get personas",
       details: error instanceof Error ? error.message : "Unknown error"
     });
   }
@@ -917,7 +1001,6 @@ router.get('/health', (req, res) => {
       service: 'tatkal-pulse-websocket-server'
   });
 });
-
 
 // API endpoint for bulk candidate upload via CSV
 router.post("/api/candidates/bulk-upload", (req, res) => {
