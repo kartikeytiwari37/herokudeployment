@@ -6,6 +6,7 @@ import fetch from "node-fetch";
 import dotenv from "dotenv";
 import { updateCandidateInterviewWithTranscript, updateCandidateInterviewStatus, CallStatus } from "./db";
 import { personaPromptMap, CustomerParams } from "./promptConfig";
+import * as metrics from "./metricsService";
 
 // Load environment variables
 dotenv.config();
@@ -80,6 +81,11 @@ function handleTwilioMessage(data: RawData) {
       session.lastAssistantItem = undefined;
       session.responseStartTimestamp = undefined;
       
+      // Initialize metrics for this call
+      if (session.callSid) {
+        session.metrics = metrics.initializeMetrics(session.callSid);
+      }
+      
       // Add system message to transcript
       addToTranscript("system", "Call started");
       
@@ -146,6 +152,11 @@ function connectToOpenAI() {
       console.log("OpenAI connection already open, skipping connection");
       return;
     }
+    
+    // Record OpenAI connection start time
+    if (session.callSid) {
+      metrics.recordOpenAIConnectionStart(session.callSid);
+    }
 
     const provider = session.aiConfig.provider;
     let wsUrl: string;
@@ -193,6 +204,11 @@ function connectToOpenAI() {
     session.modelConn.on("open", () => {
       clearTimeout(connectionTimeout);
       console.log(`Successfully connected to ${provider}`);
+      
+      // Record OpenAI connection end time
+      if (session.callSid) {
+        metrics.recordOpenAIConnectionEnd(session.callSid);
+      }
     
     // Get customer parameters
     const customerName = session.customerName || "the candidate";
@@ -314,6 +330,11 @@ function handleOpenAIMessage(data: RawData) {
       // Create a placeholder for user message
       if (event.item_id) {
         addToTranscript("user", "...", event.item_id);
+        
+        // Record user speech start
+        if (session.callSid) {
+          metrics.recordUserSpeechStart(session.callSid, event.item_id);
+        }
       }
       break;
     }
@@ -323,7 +344,22 @@ function handleOpenAIMessage(data: RawData) {
         if (session.responseStartTimestamp === undefined) {
           session.responseStartTimestamp = session.latestMediaTimestamp || 0;
         }
-        if (event.item_id) session.lastAssistantItem = event.item_id;
+        
+        // Track AI response for metrics
+        if (event.item_id) {
+          // Store the last assistant item ID for truncation
+          session.lastAssistantItem = event.item_id;
+          
+          // Record AI response start if this is a new item
+          if (session.callSid) {
+            // Check if we already have this item in the metrics
+            const metricsObj = metrics.getMetrics(session.callSid);
+            if (metricsObj && !metricsObj.aiResponseEvents.some(e => e.itemId === event.item_id)) {
+              console.log(`[METRICS] Recording AI response start for item ${event.item_id} (from audio.delta)`);
+              metrics.recordAIResponseStart(session.callSid, event.item_id);
+            }
+          }
+        }
 
         jsonSend(session.twilioConn, {
           event: "media",
@@ -364,6 +400,11 @@ function handleOpenAIMessage(data: RawData) {
         
         // Update the transcript with the transcription
         updateTranscriptItem(item_id, "user", transcript);
+        
+        // Record user speech end
+        if (session.callSid && transcript) {
+          metrics.recordUserSpeechEnd(session.callSid, item_id, transcript.length);
+        }
       }
       break;
     }
@@ -382,6 +423,12 @@ function handleOpenAIMessage(data: RawData) {
         } else {
           // Create new assistant item
           addToTranscript("assistant", part.text, item_id);
+          
+          // Record AI response start
+          if (session.callSid) {
+            console.log(`[METRICS] Recording AI response start for item ${item_id}`);
+            metrics.recordAIResponseStart(session.callSid, item_id);
+          }
         }
       }
       break;
@@ -401,6 +448,12 @@ function handleOpenAIMessage(data: RawData) {
         } else {
           // Create new assistant item
           addToTranscript("assistant", delta, item_id);
+          
+          // Record AI response start if this is a new item
+          if (session.callSid) {
+            console.log(`[METRICS] Recording AI response start for item ${item_id} (from audio_transcript.delta)`);
+            metrics.recordAIResponseStart(session.callSid, item_id);
+          }
         }
       }
       break;
@@ -413,6 +466,13 @@ function handleOpenAIMessage(data: RawData) {
         // Add function call to transcript
         const functionCallText = `${item.name}(${JSON.stringify(JSON.parse(item.arguments || '{}'))})`;
         addToTranscript("assistant", functionCallText, item.id);
+      } else if (item?.type === "message" && item.id) {
+        // Record AI response end
+        if (session.callSid && item.content) {
+          const contentText = item.content.map(c => c.text).join("");
+          console.log(`[METRICS] Recording AI response end for item ${item.id}, content length: ${contentText.length}`);
+          metrics.recordAIResponseEnd(session.callSid, item.id, contentText.length);
+        }
       }
       break;
     }
@@ -432,6 +492,16 @@ function handleTruncation() {
   const elapsedMs =
     (session.latestMediaTimestamp || 0) - (session.responseStartTimestamp || 0);
   const audio_end_ms = elapsedMs > 0 ? elapsedMs : 0;
+
+  // Record AI response end for the truncated response
+  if (session.callSid && session.lastAssistantItem) {
+    // Find the transcript item to get the content length
+    const transcriptItem = session.transcript.find(item => item.itemId === session.lastAssistantItem);
+    if (transcriptItem) {
+      console.log(`[METRICS] Recording AI response end for truncated item ${session.lastAssistantItem}, content length: ${transcriptItem.content.length}`);
+      metrics.recordAIResponseEnd(session.callSid, session.lastAssistantItem, transcriptItem.content.length);
+    }
+  }
 
   if (isOpen(session.modelConn)) {
     jsonSend(session.modelConn, {
@@ -767,6 +837,11 @@ async function saveTranscript() {
     const callSid = session.callSid || "unknown";
     const phoneNumber = session.phoneNumber || "unknown";
     
+    // Calculate overall metrics before saving
+    if (callSid !== "unknown") {
+      metrics.calculateOverallMetrics(callSid);
+    }
+    
     console.log(`📞 Call details - SID: ${callSid}, Phone: ${phoneNumber}`);
     console.log(`📝 Transcript contains ${session.transcript.length} items`);
     
@@ -800,19 +875,47 @@ async function saveTranscript() {
     // Analyze the transcript with CV information if available
     console.log("🔍 Starting transcript analysis...");
     console.log(`⏱️ Analysis started at: ${new Date().toISOString()}`);
+    
+    // Record analysis start time
+    if (callSid !== "unknown") {
+      metrics.recordAnalysisStart(callSid);
+    }
+    
     const analysis = await analyzeTranscript(textTranscript, cvInfo);
+    
+    // Record analysis end time
+    if (callSid !== "unknown") {
+      metrics.recordAnalysisEnd(callSid);
+    }
+    
     console.log(`⏱️ Analysis completed at: ${new Date().toISOString()}`);
     
-    // Update MongoDB with transcript and analysis
-    console.log(`💾 Saving transcript and analysis to MongoDB...`);
-    await updateCandidateInterviewWithTranscript(callSid, textTranscript, analysis);
-    console.log(`✅ Transcript and analysis saved to MongoDB successfully`);
+    // Update MongoDB with transcript, analysis, and metrics
+    console.log(`💾 Saving transcript, analysis, and metrics to MongoDB...`);
+    
+    // Get the metrics for this call if available
+    let callMetrics = null;
+    if (callSid !== "unknown") {
+      callMetrics = metrics.getMetrics(callSid);
+      if (callMetrics) {
+        // Convert any Date objects to ISO strings for MongoDB storage
+        callMetrics = JSON.parse(JSON.stringify(callMetrics));
+      }
+    }
+    
+    await updateCandidateInterviewWithTranscript(callSid, textTranscript, analysis, callMetrics);
+    console.log(`✅ Transcript, analysis, and metrics saved to MongoDB successfully`);
     
     // Update call status to COMPLETED
     await updateCandidateInterviewStatus(callSid, CallStatus.COMPLETED);
     console.log(`✅ Call status updated to COMPLETED in MongoDB`);
     
     console.log("=== TRANSCRIPT PROCESSING COMPLETED SUCCESSFULLY ===");
+    
+    // Log final metrics summary
+    if (callSid !== "unknown") {
+      metrics.logMetricsSummary(callSid);
+    }
     
     // Reset transcript
     session.transcript = [];

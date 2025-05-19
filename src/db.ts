@@ -123,7 +123,8 @@ export async function updateCandidateInterviewStatus(callSid: string, status: Ca
 export async function updateCandidateInterviewWithTranscript(
   callSid: string, 
   transcript: string, 
-  analysis: string
+  analysis: string,
+  callMetrics?: any
 ) {
   try {
     if (!candidateInterviews) {
@@ -135,21 +136,31 @@ export async function updateCandidateInterviewWithTranscript(
     const decision = extractDecisionFromAnalysis(analysis);
     const remarks = extractRemarksFromAnalysis(analysis);
 
+    // Prepare update object
+    const updateObj: any = { 
+      'screeningInfo.transcript': transcript,
+      'screeningInfo.analysis': analysis,
+      'screeningInfo.decision': decision,
+      'screeningInfo.remarks': remarks,
+      status: CallStatus.COMPLETED,
+      updatedAt: new Date()
+    };
+
+    // Add metrics if provided
+    if (callMetrics) {
+      updateObj['screeningInfo.metrics'] = callMetrics;
+    }
+
     const result = await candidateInterviews.updateOne(
       { _id: callSid } as any,
-      { 
-        $set: { 
-          'screeningInfo.transcript': transcript,
-          'screeningInfo.analysis': analysis,
-          'screeningInfo.decision': decision,
-          'screeningInfo.remarks': remarks,
-          status: CallStatus.COMPLETED,
-          updatedAt: new Date()
-        } 
-      }
+      { $set: updateObj }
     );
 
     console.log(`Updated transcript and analysis for call SID: ${callSid}`);
+    if (callMetrics) {
+      console.log(`Also saved metrics for call SID: ${callSid}`);
+    }
+    
     return result.modifiedCount > 0;
   } catch (error) {
     console.error('Error updating candidate interview with transcript:', error);

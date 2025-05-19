@@ -1,4 +1,5 @@
 import { WebSocket } from "ws";
+import { ConversationMetrics } from "./metricsService";
 
 export interface AIConfig {
   provider: string;
@@ -35,6 +36,7 @@ export interface Session {
   persona?: string;
   transcript: TranscriptItem[];
   disconnectReason?: string;
+  metrics?: ConversationMetrics;
 }
 
 export interface TranscriptItem {

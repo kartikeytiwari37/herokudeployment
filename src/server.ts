@@ -13,6 +13,7 @@ import multer from "multer";
 import { uploadMultipleFilesToS3, isS3Configured } from "./s3Service";
 import { parseCandidateCSV } from "./csvParser";
 import { personaExists, addPersona, getAvailablePersonas } from "./promptConfig";
+import * as metrics from "./metricsService";
 import { debug } from "console";
 
 // Load environment variables
@@ -593,6 +594,43 @@ router.get("/api/analysis/:callSid", async (req, res) => {
     console.error("Error getting analysis:", error);
     return res.status(500).json({
       error: "Failed to get analysis",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// API endpoint to get metrics for a call
+router.get("/api/metrics/:callSid", async (req, res) => {
+  try {
+    console.log(`=== RETRIEVING METRICS FOR CALL SID: ${req.params.callSid} ===`);
+    
+    const { callSid } = req.params;
+    
+    if (!callSid) {
+      console.log("⚠️ Error: Call SID is required");
+      return res.status(400).json({ error: "Call SID is required" });
+    }
+    
+    // Get the metrics for this call
+    const callMetrics = metrics.getMetrics(callSid);
+    
+    if (!callMetrics) {
+      console.log("⚠️ Error: No metrics found for this call SID");
+      return res.status(404).json({ error: `No metrics found for call SID: ${callSid}` });
+    }
+    
+    // Return the metrics
+    console.log(`Found metrics for call SID: ${callSid}`);
+    return res.json({
+      success: true,
+      callSid: callSid,
+      metrics: callMetrics
+    });
+    
+  } catch (error) {
+    console.error("Error getting metrics:", error);
+    return res.status(500).json({
+      error: "Failed to get metrics",
       details: error instanceof Error ? error.message : "Unknown error"
     });
   }
