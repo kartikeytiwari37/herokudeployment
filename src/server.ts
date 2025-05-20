@@ -599,6 +599,185 @@ router.get("/api/analysis/:callSid", async (req, res) => {
   }
 });
 
+// API endpoint to get recordings for a call
+router.get("/api/call/:callSid/recordings", async (req, res) => {
+  try {
+    const { callSid } = req.params;
+    
+    if (!callSid) {
+      return res.status(400).json({ error: "Call SID is required" });
+    }
+    
+    console.log(`Getting recordings for call SID: ${callSid}`);
+    
+    // Get recordings using Twilio client
+    const recordings = await twilioClient.calls(callSid).recordings.list();
+    
+    console.log(`Found ${recordings.length} recordings for call SID: ${callSid}`);
+    
+    return res.json({
+      success: true,
+      recordings: recordings.map(recording => ({
+        sid: recording.sid,
+        duration: recording.duration,
+        channels: recording.channels,
+        status: recording.status,
+        startTime: recording.startTime,
+        dateCreated: recording.dateCreated,
+        dateUpdated: recording.dateUpdated,
+        uri: recording.uri
+      }))
+    });
+  } catch (error) {
+    console.error("Error getting recordings:", error);
+    return res.status(500).json({
+      error: "Failed to get recordings",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// API endpoint to download a recording by recording SID
+router.get("/api/recordings/:recordingSid", async (req, res) => {
+  try {
+    const { recordingSid } = req.params;
+    const { format } = req.query;
+    
+    if (!recordingSid) {
+      return res.status(400).json({ error: "Recording SID is required" });
+    }
+    
+    console.log(`Getting recording with SID: ${recordingSid}`);
+    
+    // Determine the format (default to MP3)
+    const fileFormat = format === 'wav' ? 'wav' : 'mp3';
+    
+    // Check if S3 is configured
+    if (!isS3Configured()) {
+      return res.status(500).json({
+        error: 'S3 is not properly configured',
+        details: 'Missing required AWS environment variables'
+      });
+    }
+    
+    // Check if the recording already exists in S3
+    const s3Key = `recordings/${recordingSid}.${fileFormat}`;
+    
+    try {
+      // Try to get the file from S3
+      const { getFileFromS3 } = await import('./s3Service');
+      const s3Object = await getFileFromS3(s3Key);
+      
+      console.log(`Found recording in S3: ${s3Key}`);
+      
+      // Set the appropriate headers for the response
+      res.setHeader('Content-Type', s3Object.ContentType || (fileFormat === 'mp3' ? 'audio/mpeg' : 'audio/x-wav'));
+      res.setHeader('Content-Disposition', `attachment; filename="recording-${recordingSid}.${fileFormat}"`);
+      
+      // Send the recording data to the client
+      if (s3Object.Body instanceof Buffer) {
+        res.send(s3Object.Body);
+      } else {
+        // Convert stream to buffer if needed
+        const chunks: Buffer[] = [];
+        (s3Object.Body as any).on('data', (chunk: Buffer) => chunks.push(chunk));
+        (s3Object.Body as any).on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          res.send(buffer);
+        });
+      }
+      
+      return;
+    } catch (error) {
+      const s3Error = error as Error;
+      console.log(`Recording not found in S3, downloading from Twilio: ${s3Error.message}`);
+      
+      // If not in S3, download from Twilio and upload to S3
+      // Construct the media URL with the desired format
+      const mediaUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Recordings/${recordingSid}.${fileFormat}`;
+      
+      console.log(`Downloading recording from Twilio: ${mediaUrl}`);
+      
+      // Download the recording using fetch with authentication
+      const response = await fetch(mediaUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Basic ${Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64')}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to download recording from Twilio: ${response.statusText}`);
+      }
+      
+      // Get the content type from the response
+      const contentType = response.headers.get('content-type') || 
+        (fileFormat === 'mp3' ? 'audio/mpeg' : 'audio/x-wav');
+      
+      // Get the recording data as an array buffer
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      
+      // Upload to S3
+      const { uploadBufferToS3 } = await import('./s3Service');
+      const s3Result = await uploadBufferToS3(
+        buffer,
+        `${recordingSid}.${fileFormat}`,
+        contentType,
+        'recordings'
+      );
+      
+      console.log(`Uploaded recording to S3: ${s3Result.Key}`);
+      
+      // Set the appropriate headers for the response
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="recording-${recordingSid}.${fileFormat}"`);
+      
+      // Send the recording data to the client
+      res.send(buffer);
+    }
+  } catch (error) {
+    console.error("Error getting recording:", error);
+    return res.status(500).json({
+      error: "Failed to get recording",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// API endpoint to get recording by call SID
+router.get("/api/call/:callSid/recording", async (req, res) => {
+  try {
+    const { callSid } = req.params;
+    const { format } = req.query;
+    
+    if (!callSid) {
+      return res.status(400).json({ error: "Call SID is required" });
+    }
+    
+    console.log(`Getting recording for call SID: ${callSid}`);
+    
+    // Get the candidate interview record
+    const interview = await getCandidateInterview(callSid);
+    
+    if (!interview || !interview.screeningInfo || !interview.screeningInfo.recordingId) {
+      return res.status(404).json({ error: `No recording found for call SID: ${callSid}` });
+    }
+    
+    const recordingId = interview.screeningInfo.recordingId;
+    console.log(`Found recording ID ${recordingId} for call SID: ${callSid}`);
+    
+    // Redirect to the recording endpoint
+    return res.redirect(`/tatkal/pulse/api/recordings/${recordingId}?format=${format || 'mp3'}`);
+  } catch (error) {
+    console.error("Error getting recording for call:", error);
+    return res.status(500).json({
+      error: "Failed to get recording",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
 // API endpoint to get metrics for a call
 router.get("/api/metrics/:callSid", async (req, res) => {
   try {

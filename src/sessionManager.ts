@@ -110,6 +110,11 @@ function handleTwilioMessage(data: RawData) {
         }
       }
       
+      // Automatically start recording the call
+      if (session.callSid) {
+        startRecording(session.callSid);
+      }
+      
       // Connect to OpenAI
       connectToOpenAI();
       break;
@@ -822,6 +827,114 @@ async function analyzeTranscript(transcriptText: string, cvInfo?: any): Promise<
 }
 
 /**
+ * Start recording a call
+ */
+async function startRecording(callSid: string) {
+  try {
+    console.log(`Automatically starting recording for call SID: ${callSid}`);
+    
+    // Import twilio client
+    const twilio = require('twilio');
+    const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || '';
+    const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || '';
+    
+    // Initialize Twilio client
+    const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    
+    // Start recording using Twilio client
+    const recording = await twilioClient.calls(callSid).recordings.create({
+      recordingChannels: "dual",
+      recordingTrack: "both",
+      trim: "do-not-trim"
+    });
+    
+    console.log(`Recording started with SID: ${recording.sid}`);
+    
+    // Store the recording ID in the database
+    const { updateCandidateInterviewWithRecordingId } = await import('./db');
+    const s3Key = `recordings/${recording.sid}.mp3`; // Default to MP3 format
+    await updateCandidateInterviewWithRecordingId(callSid, recording.sid, s3Key);
+    
+    console.log(`Stored recording ID ${recording.sid} for call SID: ${callSid}`);
+    
+    // Save recording ID in session for later use
+    session.recordingSid = recording.sid;
+    
+    return recording.sid;
+  } catch (error) {
+    console.error("Error starting recording:", error);
+    return null;
+  }
+}
+
+/**
+ * Download and save a recording to S3
+ */
+async function downloadAndSaveRecording(recordingSid: string, callSid: string) {
+  try {
+    console.log(`Downloading recording ${recordingSid} for call ${callSid}`);
+    
+    // Import required modules
+    const twilio = require('twilio');
+    const { isS3Configured, uploadBufferToS3 } = await import('./s3Service');
+    
+    // Check if S3 is configured
+    if (!isS3Configured()) {
+      console.error('S3 is not properly configured, cannot save recording');
+      return;
+    }
+    
+    // Get Twilio credentials
+    const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || '';
+    const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || '';
+    
+    // Determine the format (default to MP3)
+    const fileFormat = 'mp3';
+    
+    // Construct the media URL
+    const mediaUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Recordings/${recordingSid}.${fileFormat}`;
+    
+    console.log(`Downloading recording from Twilio: ${mediaUrl}`);
+    
+    // Download the recording using fetch with authentication
+    const response = await fetch(mediaUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Basic ${Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64')}`
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to download recording from Twilio: ${response.statusText}`);
+    }
+    
+    // Get the content type from the response
+    const contentType = response.headers.get('content-type') || 
+      (fileFormat === 'mp3' ? 'audio/mpeg' : 'audio/x-wav');
+    
+    // Get the recording data as an array buffer
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    
+    // Upload to S3
+    const s3Key = `${recordingSid}.${fileFormat}`;
+    const s3Result = await uploadBufferToS3(
+      buffer,
+      s3Key,
+      contentType,
+      'recordings'
+    );
+    
+    console.log(`Uploaded recording to S3: ${s3Result.Key}`);
+    
+    return s3Result.Key;
+  } catch (error) {
+    console.error("Error downloading and saving recording:", error);
+    return null;
+  }
+}
+
+/**
  * Save the transcript to MongoDB only
  */
 async function saveTranscript() {
@@ -909,6 +1022,11 @@ async function saveTranscript() {
     // Update call status to COMPLETED
     await updateCandidateInterviewStatus(callSid, CallStatus.COMPLETED);
     console.log(`✅ Call status updated to COMPLETED in MongoDB`);
+    
+    // Download and save recording to S3 if available
+    if (session.recordingSid) {
+      await downloadAndSaveRecording(session.recordingSid, callSid);
+    }
     
     console.log("=== TRANSCRIPT PROCESSING COMPLETED SUCCESSFULLY ===");
     

@@ -37,6 +37,7 @@ export interface Session {
   transcript: TranscriptItem[];
   disconnectReason?: string;
   metrics?: ConversationMetrics;
+  recordingSid?: string;
 }
 
 export interface TranscriptItem {
