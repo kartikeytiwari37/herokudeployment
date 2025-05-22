@@ -202,6 +202,45 @@ export async function updateCandidateInterviewWithRecordingId(
 }
 
 /**
+ * Update candidate interview with audio transcription and analysis
+ */
+export async function updateCandidateInterviewWithAudioTranscription(
+  callSid: string, 
+  transcription: string, 
+  analysis: string
+) {
+  try {
+    if (!candidateInterviews) {
+      console.error('MongoDB collection not initialized');
+      return false;
+    }
+
+    // Extract decision and remarks from analysis
+    const decision = extractDecisionFromAnalysis(analysis);
+    const remarks = extractRemarksFromAnalysis(analysis);
+
+    const result = await candidateInterviews.updateOne(
+      { _id: callSid } as any,
+      { 
+        $set: { 
+          'screeningInfo.transcriptionFromAudio': transcription,
+          'screeningInfo.analysisFromAudio': analysis,
+          'screeningInfo.decisionFromAudio': decision,
+          'screeningInfo.remarksFromAudio': remarks,
+          updatedAt: new Date()
+        } 
+      }
+    );
+
+    console.log(`Updated audio transcription and analysis for call SID: ${callSid}`);
+    return result.modifiedCount > 0;
+  } catch (error) {
+    console.error('Error updating candidate interview with audio transcription:', error);
+    return false;
+  }
+}
+
+/**
  * Get candidate interview by call SID
  */
 export async function getCandidateInterview(callSid: string) {

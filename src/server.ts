@@ -506,6 +506,37 @@ router.get("/api/transcript/:callSid", async (req, res) => {
   }
 });
 
+// API endpoint to get audio transcript for a call
+router.get("/api/audio-transcript/:callSid", async (req, res) => {
+  try {
+    const { callSid } = req.params;
+    
+    if (!callSid) {
+      return res.status(400).json({ error: "Call SID is required" });
+    }
+    
+    console.log(`Getting audio transcript for call SID: ${callSid}`);
+    
+    // Get the transcript from MongoDB
+    const interview = await getCandidateInterview(callSid);
+    
+    if (!interview || !interview.screeningInfo || !interview.screeningInfo.transcriptionFromAudio) {
+      return res.status(404).json({ error: `No audio transcript found for call SID: ${callSid}` });
+    }
+    
+    // Return the audio transcript from MongoDB
+    console.log(`Found audio transcript in MongoDB for call SID: ${callSid}`);
+    return res.type('text/plain').send(interview.screeningInfo.transcriptionFromAudio);
+    
+  } catch (error) {
+    console.error("Error getting audio transcript:", error);
+    return res.status(500).json({
+      error: "Failed to get audio transcript",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
 // API endpoint to download transcript or analysis as a text file
 router.get("/api/download/:callSid", async (req, res) => {
   try {
@@ -594,6 +625,39 @@ router.get("/api/analysis/:callSid", async (req, res) => {
     console.error("Error getting analysis:", error);
     return res.status(500).json({
       error: "Failed to get analysis",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// API endpoint to get audio analysis for a call
+router.get("/api/audio-analysis/:callSid", async (req, res) => {
+  try {
+    console.log(`=== RETRIEVING AUDIO ANALYSIS FOR CALL SID: ${req.params.callSid} ===`);
+    
+    const { callSid } = req.params;
+    
+    if (!callSid) {
+      console.log("⚠️ Error: Call SID is required");
+      return res.status(400).json({ error: "Call SID is required" });
+    }
+    
+    // Get the analysis from MongoDB
+    const interview = await getCandidateInterview(callSid);
+    
+    if (!interview || !interview.screeningInfo || !interview.screeningInfo.analysisFromAudio) {
+      console.log("⚠️ Error: No audio analysis found for this call SID");
+      return res.status(404).json({ error: `No audio analysis found for call SID: ${callSid}` });
+    }
+    
+    // Return the audio analysis from MongoDB
+    console.log(`Found audio analysis in MongoDB for call SID: ${callSid}`);
+    return res.type('text/plain').send(interview.screeningInfo.analysisFromAudio);
+    
+  } catch (error) {
+    console.error("Error getting audio analysis:", error);
+    return res.status(500).json({
+      error: "Failed to get audio analysis",
       details: error instanceof Error ? error.message : "Unknown error"
     });
   }

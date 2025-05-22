@@ -1024,8 +1024,9 @@ async function saveTranscript() {
     console.log(`✅ Call status updated to COMPLETED in MongoDB`);
     
     // Download and save recording to S3 if available
+    let recordingS3Key = null;
     if (session.recordingSid) {
-      await downloadAndSaveRecording(session.recordingSid, callSid);
+      recordingS3Key = await downloadAndSaveRecording(session.recordingSid, callSid);
     }
     
     console.log("=== TRANSCRIPT PROCESSING COMPLETED SUCCESSFULLY ===");
@@ -1033,6 +1034,27 @@ async function saveTranscript() {
     // Log final metrics summary
     if (callSid !== "unknown") {
       metrics.logMetricsSummary(callSid);
+    }
+    
+    // Process audio recording for transcription and analysis if recording is available
+    if (recordingS3Key) {
+      try {
+        console.log(`=== STARTING AUDIO PROCESSING FOR CALL SID: ${callSid} ===`);
+        const { processAudioRecording } = await import('./audioTranscriptionService');
+        
+        // Process the audio recording asynchronously
+        processAudioRecording(recordingS3Key, callSid)
+          .then(() => {
+            console.log(`✅ Audio processing completed successfully for call SID: ${callSid}`);
+          })
+          .catch(error => {
+            console.error(`❌ Error processing audio for call SID: ${callSid}:`, error);
+          });
+      } catch (audioError) {
+        console.error(`❌ Error initiating audio processing:`, audioError);
+      }
+    } else {
+      console.log(`⚠️ No recording S3 key available, skipping audio processing`);
     }
     
     // Reset transcript
