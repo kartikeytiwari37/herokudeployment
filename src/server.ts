@@ -831,8 +831,8 @@ router.get("/api/call/:callSid/recording", async (req, res) => {
     const recordingId = interview.screeningInfo.recordingId;
     console.log(`Found recording ID ${recordingId} for call SID: ${callSid}`);
     
-    // Redirect to the recording endpoint
-    return res.redirect(`/tatkal/pulse/api/recordings/${recordingId}?format=${format || 'mp3'}`);
+    // Redirect to the recording endpoint using path prefix from environment variable
+    return res.redirect(`${PATH_PREFIX}/api/recordings/${recordingId}?format=${format || 'mp3'}`);
   } catch (error) {
     console.error("Error getting recording for call:", error);
     return res.status(500).json({
