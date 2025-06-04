@@ -730,6 +730,16 @@ async function analyzeTranscript(transcriptText: string, cvInfo?: any): Promise<
       ${hasHindiContent ? "IMPORTANT: This transcript contains content in Hindi. As a multilingual analyzer, please analyze both Hindi and English portions of the conversation." : ""}
       ${hasNonEnglishContent ? "IMPORTANT: This transcript contains content in a non-English language. Please do your best to analyze it, focusing on the overall structure of the conversation." : ""}
       
+      PRODUCT EXPERIENCE MAPPING:
+      Housing Finance: Home Loans, Mortgages, LAP (Loan Against Property)
+      SBL (Secured Business Loans): Pure LAP & Home loans
+      UBL (Unsecured Business Loans): Small Business Banking, Unsecured Loans, Business Loans
+      PL (Personal Loans): Credit Card & PL, CA (Current Accounts) SA (Savings Accounts) & PL, PL & GL (Gold Loans)
+      UCL (Used Car Loans): Auto Loans, 4 wheeler loans, CV (Commercial Vehicle), Used Car, Sales Dealership
+      MLAP (Micro LAP): Pure Low LAP or LAP & Home Loans
+      
+      When analyzing work experience, cross-reference candidate's mentioned products with required product using above mapping. If candidate has relevant experience per mapping, mark as qualified; if not, mark as NO GO.
+      
       ${cvInfoSection ? cvInfoSection : ""}
       
       ${cvInfoSection ? "IMPORTANT: Compare the information provided by the candidate during the interview with the information from their CV. Note any discrepancies or inconsistencies in your analysis." : ""}
